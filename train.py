@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import torchvision.models as models
 from torch.utils.data import DataLoader
 
 from method import get_grad
@@ -53,7 +54,10 @@ class Trainer():
         try:
             self.model = models_dict[args.model.lower()](**kwargs_model).cuda()
         except:
-            raise NotImplementedError
+            try:
+                self.model = models.__dict__[args.model.lower()](**kwargs_model).cuda()
+            except:
+                raise NotImplementedError
 
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.wd)
@@ -61,14 +65,22 @@ class Trainer():
 
     def train(self, epoch):
         self.model.train()
+        self.train_loader.dataset.retransform()
         losses = 0
         top1 = AverageMeter('Top1 Accuracy')
         
         if epoch == 0:
-            # Construct Average Gradient
+            # Construct Average Gradient (option: initial minibatch grad / zeros)
             self.model.average_grad = []
+            image, label = next(iter(self.train_loader))
+            image, label = image.cuda(), label.cuda()
+            pred_label = self.model(image)
+            loss = self.criterion(pred_label, label)
+            self.optimizer.zero_grad()
+            loss.backward()
             for param in self.model.parameters():
-                self.model.average_grad.append(torch.zeros_like(param))
+                # self.model.average_grad.append(torch.zeros_like(param))
+                self.model.average_grad.append(param.grad.data)
 
         for i, data in enumerate(tqdm(self.train_loader)):
             image = data[0].cuda()
@@ -152,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.01, 
                         help='average gradient momentum param for bigcomp20 method')
     # compression hyperparameters
-    parser.add_argument('--seed-interval', type=int, default=150,
+    parser.add_argument('--seed-interval', type=int, default=1,
                         help='interval for seed change')
     parser.add_argument('--conv-cr', type=float, default=0.0625,
                         help='convolutional layers compression ratio (default:1/16)')

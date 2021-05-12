@@ -21,8 +21,12 @@ def get_grad(loss, model, args):
     distance_grad = distance(sgd, model.average_grad) 
 
     # generate random matrix R
-    random_matrix_lst = generate_randommatrixlist(model, args.conv_cr, args.fc_cr, args.sparsity)
-    
+    if not hasattr(model, 'iters') or model.iters % args.seed_interval == 0:
+        model.iters = 0
+        global random_matrix_lst
+        random_matrix_lst = generate_randommatrixlist(model, args.conv_cr, args.fc_cr, args.sparsity)
+    model.iters += 1
+
     for param_idx, param in enumerate(model.parameters()):
         if len(param.shape) == 4:
             sh = param.shape
