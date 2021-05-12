@@ -1,11 +1,5 @@
 import util
-import argparse
-import os
-import random
-import shutil
-import time
-import warnings
-
+import os, argparse, random, shutil, time, builtins, warnings
 import numpy as np
 
 import torch
@@ -71,26 +65,26 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=300, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--dataset', type=str, default='cifar10',
                     choices=['cifar10', 'cifar100'])
-parser.add_argument('--trainbatch', default=128, type=int, metavar='N',
+parser.add_argument('--trainbatch', default=1024, type=int, metavar='N',
                         help='mini-batch size (default: 1024), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--testbatch', default=100, type=int, metavar='N',
+parser.add_argument('--testbatch', default=512, type=int, metavar='N',
                         help='test batch size')
 
 
-parser.add_argument('--schedule', type=int, nargs='+', default=[60, 90],
+parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
                         help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
 
 
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -117,7 +111,7 @@ parser.add_argument('--world-size', default=1, type=int,
                     help='number of nodes for distributed training')
 parser.add_argument('--rank', default=0, type=int,
                     help='node rank for distributed training')
-parser.add_argument('--dist-url', default='tcp://localhost:10001', type=str,
+parser.add_argument('--dist-url', default='tcp://localhost:20001', type=str,
                     help='url used to set up distributed training')
 parser.add_argument('--dist-backend', default='nccl', type=str,
                     help='distributed backend')
@@ -138,7 +132,7 @@ parser.add_argument('--gpu_count',default= 4, type=int, help='use gpu count')
 
 """---------------------------------------------코드 실행---------------------------------------------------- """
 ''' # --save_path './test/' --gpu_count 4 만 변경하고 돌릴 것 '''
-# python terngrad_dist.py --multiprocessing-distributed --save_path ./terngrad_dist --gpu_count 4
+# python terngrad_dist.py --dataset cifar100 --save_path ./terngrad_dist --multiprocessing-distributed --gpu_count 8
 """--------------------------------------------------------------------------------------------------------- """
 
 best_acc1 = 0
@@ -225,9 +219,13 @@ def main_worker(gpu, ngpus_per_node, args):
     
     args.gpu = gpu
 
+    if args.multiprocessing_distributed and args.gpu != 0:
+        def print_pass(*args):
+            pass
+        builtins.print = print_pass
     ###############################################################
     if args.gpu is not None:                                       
-        print("Use GPU: {} for training".format(args.gpu_count))#args.gpu_count=4
+        print("Use GPU: {} for training".format(args.gpu))
     ###############################################################
  
 
@@ -337,8 +335,8 @@ def main_worker(gpu, ngpus_per_node, args):
         train_dataset = CIFAR_Wrapper(root='../', train=True, download=False, transform=transform_train, nclass=10)
         test_dataset = datasets.CIFAR10(root='../', train=False, download=False, transform=transform_test)
     elif args.dataset == 'cifar100':
-        train_dataset = CIFAR_Wrapper(root='../', train=True, download=False, transform=transform_train, nclass=100)
-        test_dataset = datasets.CIFAR100(root='../', train=False, download=False, transform=transform_test)
+        train_dataset = CIFAR_Wrapper(root='/home/osilab/dataset/cifar100', train=True, download=False, transform=transform_train, nclass=100)
+        test_dataset = datasets.CIFAR100(root='/home/osilab/dataset/cifar100', train=False, download=False, transform=transform_test)
 
     
     ''' *지우지 말것*   train dataset 넘겨줄것. -> DistributedSampler(train_dataset) '''
@@ -469,8 +467,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logger, time_l
 
         ''' -------------------------각 GPU log 합쳐주기-----------------------------'''
         reduced_loss = reduce_tensor(loss.data)
-        reduced_top1 = reduce_tensor(acc1[0].data)
-        reduced_top5 = reduce_tensor(acc5[0].data)
+        reduced_top1 = reduce_tensor(acc1.data)
+        reduced_top5 = reduce_tensor(acc5.data)
 
         ''' ------------------------- averageMeter에 업데이트 -----------------------------'''
         losses.update(reduced_loss.item(), images.size(0))
@@ -524,8 +522,8 @@ def validate(test_loader, model, criterion, epoch, args, logger, time_logger):
             acc1, acc5, correct = util.accuracy(output, target, topk=(1, 5))
 
             reduced_loss = reduce_tensor(loss.data)######각 worker에서의 loss를 average ####
-            reduced_top1 = reduce_tensor(acc1[0].data)######각 worker에서의 top1 accuracy를 average ####
-            reduced_top5 = reduce_tensor(acc5[0].data)######각 worker에서의 top5 accuracy를 average ####
+            reduced_top1 = reduce_tensor(acc1.data)######각 worker에서의 top1 accuracy를 average ####
+            reduced_top5 = reduce_tensor(acc5.data)######각 worker에서의 top5 accuracy를 average ####
 
             losses.update(reduced_loss.item(), images.size(0))
             top1.update(reduced_top1.item(), images.size(0))
@@ -550,13 +548,13 @@ def validate(test_loader, model, criterion, epoch, args, logger, time_logger):
 
 def average_gradients(model):
     for param in model.parameters():
-        dist.all_reduce(param.grad.data, op=dist.reduce_op.SUM)
+        dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
         param.grad.data /= args.gpu_count
 
 '''-----------------------------GPU에 있는 각 데이터 평균 취하기------------------------'''
 def reduce_tensor(tensor):
     rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.reduce_op.SUM)
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
     # gpu 갯수로 나눠줌.
     rt /= args.gpu_count
     return rt
