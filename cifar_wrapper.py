@@ -53,8 +53,8 @@ class CIFAR_Wrapper(torch.utils.data.Dataset):
 
     # flushes the cache of transformed images
     def retransform(self):
-        print("total calls retransform: {}, cache hits: {}".format(
-            self.access_since_retransform, self.cache_hit))
+        # print("total calls retransform: {}, cache hits: {}".format(
+        #     self.access_since_retransform, self.cache_hit))
         #print("total: ", self.access_total)
         self.transformed_cache = {}
         self.access_since_retransform = 0
