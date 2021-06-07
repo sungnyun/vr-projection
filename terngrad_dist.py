@@ -17,7 +17,8 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 import torchvision
 
-from resnet import *
+from models.resnet20 import *
+from models.resnet18 import *
 from cifar_wrapper import CIFAR_Wrapper
 
 
@@ -245,7 +246,8 @@ def main_worker(gpu, ngpus_per_node, args):
     
     
     
-    model = resnet20(num_classes=100)
+    # model = resnet20(num_classes=100)
+    model = resnet18(num_classes=100)
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda(args.gpu)

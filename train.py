@@ -14,7 +14,7 @@ import torchvision.models as models
 from torch.utils.data import DataLoader
 
 from method import get_grad
-from resnet import *
+from models.resnet20 import *
 from utils import *
 from cifar_wrapper import CIFAR_Wrapper
 
