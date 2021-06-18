@@ -130,6 +130,7 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 """---------------------------------------- 파서 작성 ---------------------------------------- """
 parser.add_argument('--save_path',default='./res152_softmax1.0/', type=str, help='savepath')
 parser.add_argument('--gpu_count',default= 4, type=int, help='use gpu count')
+parser.add_argument('--clip_grad', default=False, action='store_true')
 
 """---------------------------------------------코드 실행---------------------------------------------------- """
 ''' # --save_path './test/' --gpu_count 4 만 변경하고 돌릴 것 '''
@@ -165,6 +166,16 @@ def ternarize_grad(grad):
         tern_grad_component.append(bernoulli * sign_tensors[i])
         
     return max_s_t, tern_grad_component
+
+def clip(tensor):
+    shape = tensor.size()
+    tensor = tensor.flatten()
+    std = (tensor - torch.mean(tensor)) ** 2
+    std = torch.sqrt(torch.mean(std))
+    c = 2.5 * std.item()
+    clipped_tensor = (torch.clamp(tensor, -c, c)).reshape(shape)
+    return clipped_tensor
+
 
 MEAN = {'cifar10': (0.4914, 0.4822, 0.4465),
         'cifar100': (0.5071, 0.4867, 0.4408)}
@@ -438,6 +449,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logger, time_l
 
         optimizer.zero_grad()
         grad = torch.autograd.grad(loss, model.parameters())
+        
+        if args.clip_grad:
+            for grad_layer in grad:
+                grad_layer = clip(grad_layer)
 
         max_s_t, tern_grad_component = ternarize_grad(grad)
 
