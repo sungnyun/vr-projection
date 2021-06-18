@@ -66,7 +66,7 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=300, type=int, metavar='N',
+parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -80,7 +80,7 @@ parser.add_argument('--testbatch', default=512, type=int, metavar='N',
                         help='test batch size')
 
 
-parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+parser.add_argument('--schedule', type=int, nargs='+', default=[75, 130, 180],
                         help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
 
@@ -135,6 +135,7 @@ parser.add_argument('--clip_grad', default=False, action='store_true')
 """---------------------------------------------코드 실행---------------------------------------------------- """
 ''' # --save_path './test/' --gpu_count 4 만 변경하고 돌릴 것 '''
 # python terngrad_dist.py --dataset cifar100 --save_path ./terngrad_dist --multiprocessing-distributed --gpu_count 8
+# python terngrad_dist.py --dataset cifar100 --save_path ./terngrad_dist --lr 0.08 --gpu_count 8 --trainbatch 1024 --multiprocessing-distributed
 """--------------------------------------------------------------------------------------------------------- """
 
 best_acc1 = 0
