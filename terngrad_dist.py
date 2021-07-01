@@ -452,8 +452,11 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logger, time_l
         grad = torch.autograd.grad(loss, model.parameters())
         
         if args.clip_grad:
+            clipped_grad = []
             for grad_layer in grad:
                 grad_layer = clip(grad_layer)
+                clipped_grad.append(grad_layer)
+            grad = clipped_grad
 
         max_s_t, tern_grad_component = ternarize_grad(grad)
 

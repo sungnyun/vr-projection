@@ -161,19 +161,6 @@ STD = {'cifar10': (0.2470, 0.2435, 0.2616),
 
 
 def main():
-    #########################################################################
-    if args.seed is not None: #False#
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.cuda.manual_seed(args.seed)
-        cudnn.deterministic = True
-        warnings.warn('You have chosen to seed training. '
-                      'This will turn on the CUDNN deterministic setting, '
-                      'which can slow down your training considerably! '
-                      'You may see unexpected behavior when restarting '
-                      'from checkpoints.')
-
     if args.gpu is not None: #False#
         warnings.warn('You have chosen a specific GPU. This will completely '
                       'disable data parallelism.')
@@ -210,10 +197,10 @@ def main_worker(gpu, ngpus_per_node, args):
     
     args.gpu = gpu
 
-    if args.multiprocessing_distributed and args.gpu != 0:
-        def print_pass(*args):
-            pass
-        builtins.print = print_pass
+    #if args.multiprocessing_distributed and args.gpu != 0:
+    #    def print_pass(*args):
+    #        pass
+    #    builtins.print = print_pass
     ###############################################################
     if args.gpu is not None:                                       
         print("Use GPU: {} for training".format(args.gpu))
@@ -230,10 +217,22 @@ def main_worker(gpu, ngpus_per_node, args):
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
     
-
-    
+    #########################################################################
+    if args.seed is not None: #False#
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
+        cudnn.deterministic = True
+        #warnings.warn('You have chosen to seed training. '
+        #              'This will turn on the CUDNN deterministic setting, '
+        #              'which can slow down your training considerably! '
+        #              'You may see unexpected behavior when restarting '
+        #              'from checkpoints.')
+    else:
+        raise Exception('Set seed or this method does not work!')
+   
     """---------------------------------------- 모델, opimizer,loss 선언 ---------------------------------------- """
-    
     
     
     # model = resnet20(num_classes=100)
@@ -418,6 +417,8 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
         # measure data loading time
         data_time.update(time.time() - end)
         random_matrix_lst = generate_random_matrixlist(model)
+        print(random_matrix_lst[0][:5])
+        raise
 
         if args.gpu is not None:######args.gpu= not None#######
             images = images.cuda(args.gpu, non_blocking=True)
@@ -581,12 +582,12 @@ def generate_random_matrixlist(model):
         if len(param.shape) == 4:
             sh = param.shape
             row_d = sh[0]
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=conv_cr, s=1)
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.conv_cr, s=1)
             random_matrix_lst.append(u)     
         if len(param.shape) == 2:
             sh = param.shape
             row_d = max(sh[0], sh[1])
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=fc_cr, s=1)
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.fc_cr, s=1)
             random_matrix_lst.append(u)
         elif len(param.shape) == 1:
             random_matrix_lst.append(None)
