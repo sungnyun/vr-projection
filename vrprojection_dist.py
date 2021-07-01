@@ -198,10 +198,10 @@ def main_worker(gpu, ngpus_per_node, args):
     
     args.gpu = gpu
 
-    if args.multiprocessing_distributed and args.gpu != 0:
-        def print_pass(*args):
-            pass
-        builtins.print = print_pass
+    #if args.multiprocessing_distributed and args.gpu != 0:
+    #    def print_pass(*args):
+    #        pass
+    #    builtins.print = print_pass
     ###############################################################
     if args.gpu is not None:                                       
         print("Use GPU: {} for training".format(args.gpu))
@@ -418,6 +418,8 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
         # measure data loading time
         data_time.update(time.time() - end)
         random_matrix_lst = generate_random_matrixlist(model)
+        print(random_matrix_lst[0][:5])
+        raise
 
         if args.gpu is not None:######args.gpu= not None#######
             images = images.cuda(args.gpu, non_blocking=True)
