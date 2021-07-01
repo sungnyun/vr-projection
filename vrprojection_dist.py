@@ -1,3 +1,4 @@
+import copy
 import util
 import os, argparse, random, shutil, time, builtins, warnings
 import numpy as np
@@ -161,19 +162,6 @@ STD = {'cifar10': (0.2470, 0.2435, 0.2616),
 
 
 def main():
-    #########################################################################
-    if args.seed is not None: #False#
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.cuda.manual_seed(args.seed)
-        cudnn.deterministic = True
-        warnings.warn('You have chosen to seed training. '
-                      'This will turn on the CUDNN deterministic setting, '
-                      'which can slow down your training considerably! '
-                      'You may see unexpected behavior when restarting '
-                      'from checkpoints.')
-
     if args.gpu is not None: #False#
         warnings.warn('You have chosen a specific GPU. This will completely '
                       'disable data parallelism.')
@@ -230,10 +218,22 @@ def main_worker(gpu, ngpus_per_node, args):
     dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                             world_size=args.world_size, rank=args.rank)
     
-
-    
+    #########################################################################
+    if args.seed is not None: #False#
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
+        cudnn.deterministic = True
+        #warnings.warn('You have chosen to seed training. '
+        #              'This will turn on the CUDNN deterministic setting, '
+        #              'which can slow down your training considerably! '
+        #              'You may see unexpected behavior when restarting '
+        #              'from checkpoints.')
+    else:
+        raise Exception('Set seed or this method does not work!')
+   
     """---------------------------------------- 모델, opimizer,loss 선언 ---------------------------------------- """
-    
     
     
     # model = resnet20(num_classes=100)
@@ -430,7 +430,7 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
         loss.backward()
         sgd_origin = []
         for param in model.parameters():
-            sgd_origin.append(param.grad.data + args.wd * param.data)
+            sgd_origin.append(param.grad.data + args.weight_decay*param.data)
         sgd = copy.deepcopy(sgd_origin)
         
         with torch.no_grad():
@@ -448,7 +448,7 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
                     decoding_grad = torch.mm(u, encoding_grad)
                     average_grad[param_idx] = args.conv_cr*decoding_grad.reshape(sh) + args.momentum*average_grad[param_idx]
 
-                    new_encoding_grad = torch.mm(u_t, (param.grad.data + args.wd*param.data - average_grad[param_idx]).reshape([sh[0], sh[1] * sh[2] * sh[3]]))                        
+                    new_encoding_grad = torch.mm(u_t, (param.grad.data + args.weight_decay*param.data - average_grad[param_idx]).reshape([sh[0], sh[1] * sh[2] * sh[3]]))                        
                     new_decoding_grad = torch.mm(u, new_encoding_grad)
                     buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx].reshape([sh[0], sh[1] * sh[2] * sh[3]])).reshape(sh) + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]                
@@ -464,7 +464,7 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
                     decoding_grad = torch.mm(encoding_grad, u_t)
                     average_grad[param_idx] = args.fc_cr*decoding_grad + args.momentum*average_grad[param_idx]
 
-                    new_encoding_grad = torch.mm((param.grad.data + args.wd*param.data - average_grad[param_idx]), u)
+                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]), u)
                     new_decoding_grad = torch.mm(new_encoding_grad, u_t)
                     buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx]) + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]
@@ -581,12 +581,12 @@ def generate_random_matrixlist(model):
         if len(param.shape) == 4:
             sh = param.shape
             row_d = sh[0]
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=conv_cr, s=1)
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.conv_cr, s=1)
             random_matrix_lst.append(u)     
         if len(param.shape) == 2:
             sh = param.shape
             row_d = max(sh[0], sh[1])
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=fc_cr, s=1)
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.fc_cr, s=1)
             random_matrix_lst.append(u)
         elif len(param.shape) == 1:
             random_matrix_lst.append(None)
