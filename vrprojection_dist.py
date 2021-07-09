@@ -86,7 +86,7 @@ parser.add_argument('--schedule', type=int, nargs='+', default=[75, 130, 180],
 parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
 
 
-parser.add_argument('--lr', '--learning-rate', default=0.08, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.8, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -96,7 +96,7 @@ parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
 parser.add_argument('-p', '--print-freq', default=20, type=int,
                     metavar='N', help='print frequency (default: 10)')
 
-parser.add_argument('--conv-cr', default=0.0625, type=float,
+parser.add_argument('--conv-cr', default=0.0156254, type=float,
                     help='compression ratio for convolutional layers')
 parser.add_argument('--fc-cr', default=0.0625, type=float,
                     help='compression ratio for fc layers')
@@ -198,10 +198,10 @@ def main_worker(gpu, ngpus_per_node, args):
     
     args.gpu = gpu
 
-    #if args.multiprocessing_distributed and args.gpu != 0:
-    #    def print_pass(*args):
-    #        pass
-    #    builtins.print = print_pass
+    if args.multiprocessing_distributed and args.gpu != 0:
+        def print_pass(*args):
+            pass
+        builtins.print = print_pass
     ###############################################################
     if args.gpu is not None:                                       
         print("Use GPU: {} for training".format(args.gpu))
@@ -358,10 +358,11 @@ def main_worker(gpu, ngpus_per_node, args):
     valid_time_logger = util.Logger(os.path.join(save_path, 'valid_time.log'))
     ##################################################################################
     
-    average_grad, buffer_svrg = [], []
+    average_grad, buffer_svrg, EC_grad = [], [], []
     for param in model.parameters():
         average_grad.append(torch.zeros(param.size()).cuda())
         buffer_svrg.append(torch.zeros(param.size()).cuda())
+        EC_grad.append(torch.zeros(param.size()).cuda())
     
     ''' -------------------------학습 시작-----------------------------'''
     for epoch in range(args.start_epoch, args.epochs):
@@ -374,7 +375,7 @@ def main_worker(gpu, ngpus_per_node, args):
         adjust_learning_rate(optimizer, epoch)
 
         ''' -------------------------train-----------------------------'''
-        train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, epoch, args, train_logger, train_time_logger)
+        train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, optimizer, epoch, args, train_logger, train_time_logger)
 
         ''' -------------------------valid-----------------------------'''
         acc1 = validate(test_loader, model, criterion, epoch, args, valid_logger, valid_time_logger)
@@ -383,8 +384,7 @@ def main_worker(gpu, ngpus_per_node, args):
         is_best = acc1 > best_acc1
         best_acc1 = max(acc1, best_acc1)
 
-        if not args.multiprocessing_distributed or (args.multiprocessing_distributed##############그럴 일 없음############
-                and args.rank % ngpus_per_node == 0):
+        if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
             util.save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': 'resnet20',
@@ -392,9 +392,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 'best_acc1': best_acc1,
                 'optimizer' : optimizer.state_dict(),
             }, is_best)
+            print(' * Best Acc@1 {:.3f}'.format(best_acc1))
 
             
-def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, epoch, args, logger, time_logger):
+def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, optimizer, epoch, args, logger, time_logger):
     ''' -------------------------averageMeter 선언.-----------------------------'''
     batch_time = util.AverageMeter('Time', ':6.3f')
     data_time = util.AverageMeter('Data', ':6.3f')
@@ -437,41 +438,45 @@ def train(average_grad, buffer_svrg, train_loader, model, criterion, optimizer, 
             for param_idx, param in enumerate(model.parameters()):
                 if len(param.shape) == 4:
                     sh = param.shape
-                    update_param_grad = sgd[param_idx].reshape([sh[0], sh[1] * sh[2] * sh[3]])
+                    compression_length = sh[1] * sh[2] * sh[3]
+                    update_param_grad = (sgd[param_idx] + (1/compression_length) * EC_grad[param_idx]).reshape([sh[0], compression_length])
                     u = random_matrix_lst[param_idx]
                     u = torch.from_numpy(u)# tensor로 바뀜
                     u = u.type(torch.FloatTensor).cuda(args.gpu)
                     u_t = u.transpose(0, 1)
                     
                     # Compression Gradient with Random Matrix
-                    encoding_grad = torch.mm(u_t, update_param_grad)
-                    decoding_grad = torch.mm(u, encoding_grad)
-                    average_grad[param_idx] = args.conv_cr*decoding_grad.reshape(sh) + args.momentum*average_grad[param_idx]
+                    encoding_grad = torch.mm(update_param_grad, u)
+                    decoding_grad = torch.mm(encoding_grad, u_t)
+                    average_grad[param_idx] = (1/compression_length)*decoding_grad.reshape(sh) + args.momentum*average_grad[param_idx]
 
-                    new_encoding_grad = torch.mm(u_t, (param.grad.data + args.weight_decay*param.data - average_grad[param_idx]).reshape([sh[0], sh[1] * sh[2] * sh[3]]))                        
-                    new_decoding_grad = torch.mm(u, new_encoding_grad)
-                    buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx].reshape([sh[0], sh[1] * sh[2] * sh[3]])).reshape(sh) + args.momentum*buffer_svrg[param_idx]
+                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]).reshape([sh[0], compression_length]), u)                        
+                    new_decoding_grad = torch.mm(new_encoding_grad, u_t)
+                    buffer_svrg[param_idx] = clip(new_decoding_grad + average_grad[param_idx].reshape([sh[0], compression_length])).reshape(sh) + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]                
+
+                    EC_grad[param_idx] = sgd[param_idx] - decoding_grad.reshape(sh)
             
                 elif len(param.shape) == 2:
-                    u = random_matrix_lst[param_idx]
-                    u = torch.from_numpy(u)
-                    u = u.type(torch.FloatTensor).cuda(args.gpu)
-                    u_t = u.transpose(0, 1)
-
-                    # Compression Gradient with Random Matrix
-                    encoding_grad = torch.mm(sgd[param_idx], u)
-                    decoding_grad = torch.mm(encoding_grad, u_t)
-                    average_grad[param_idx] = args.fc_cr*decoding_grad + args.momentum*average_grad[param_idx]
-
-                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]), u)
-                    new_decoding_grad = torch.mm(new_encoding_grad, u_t)
-                    buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx]) + args.momentum*buffer_svrg[param_idx]
-                    param.grad.data = buffer_svrg[param_idx]
-
+#                    u = random_matrix_lst[param_idx]
+#                    u = torch.from_numpy(u)
+#                    u = u.type(torch.FloatTensor).cuda(args.gpu)
+#                    u_t = u.transpose(0, 1)
+#
+#                    # Compression Gradient with Random Matrix
+#                    encoding_grad = torch.mm(sgd[param_idx], u)
+#                    decoding_grad = torch.mm(encoding_grad, u_t)
+#                    average_grad[param_idx] = args.fc_cr*decoding_grad + args.momentum*average_grad[param_idx]
+#
+#                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]), u)
+#                    new_decoding_grad = torch.mm(new_encoding_grad, u_t)
+#                    buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx]) + args.momentum*buffer_svrg[param_idx]
+                    buffer_svrg[param_idx] = sgd[param_idx] + args.momentum * buffer_svrg[param_idx]
+                    #TODO: clipping point check!
+                    param.grad.data = clip(buffer_svrg[param_idx])
                 else:
-                    buffer_svrg[param_idx] = (sgd[param_idx]) + args.momentum*buffer_svrg[param_idx]
-                    param.grad.data = buffer_svrg[param_idx]
+                    buffer_svrg[param_idx] = sgd[param_idx] + args.momentum * buffer_svrg[param_idx]
+                    param.grad.data = clip(buffer_svrg[param_idx])
         
         # if args.clip_grad:
         #     for grad_layer in grad:
@@ -580,14 +585,14 @@ def generate_random_matrixlist(model):
     for param_idx, param in enumerate(model.parameters()):
         if len(param.shape) == 4:
             sh = param.shape
-            row_d = sh[0]
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.conv_cr, s=1)
+            row_d = sh[1] * sh[2] * sh[3]
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=1/row_d, s=1)
             random_matrix_lst.append(u)     
         if len(param.shape) == 2:
-            sh = param.shape
-            row_d = max(sh[0], sh[1])
-            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.fc_cr, s=1)
-            random_matrix_lst.append(u)
+#            sh = param.shape
+#            row_d = max(sh[0], sh[1])
+#            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.fc_cr, s=1)
+            random_matrix_lst.append(None)
         elif len(param.shape) == 1:
             random_matrix_lst.append(None)
 
