@@ -143,8 +143,8 @@ parser.add_argument('--clip_grad', default=False, action='store_true')
 best_acc1 = 0
 args = parser.parse_args()
 args.lr *= args.trainbatch / 128
-for epoch in args.schedule:
-    args.schedule[epoch] *= int(args.epochs / 200)
+for idx in range(len(args.schedule)):
+    args.schedule[idx] *= int(args.epochs / 200)
 state = {k: v for k, v in args._get_kwargs()}
 
 MEAN = {'cifar10': (0.4914, 0.4822, 0.4465),
@@ -440,7 +440,7 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
                 if len(param.shape) == 4:
                     sh = param.shape
                     compression_length = sh[1] * sh[2] * sh[3]
-                    update_param_grad = sgd[param_idx].reshape([sh[0], compression_length)
+                    update_param_grad = sgd[param_idx].reshape([sh[0], compression_length])
                     update_param_grad = clip(update_param_grad)
 
                     u = torch.from_numpy(random_matrix_lst[param_idx]).float().cuda(args.gpu)
@@ -453,10 +453,7 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
 
                     new_encoding_grad = torch.mm((update_param_grad.reshape(sh) - average_grad[param_idx]).reshape([sh[0], compression_length]), u)                        
                     new_decoding_grad = torch.mm(new_encoding_grad, u_t)
-                    buffer_svrg[param_idx] = new_decoding_grad.reshape(sh) + 
-                                             average_grad[param_idx] + 
-                                             args.weight_decay * param.data +
-                                             args.momentum * buffer_svrg[param_idx]
+                    buffer_svrg[param_idx] = new_decoding_grad.reshape(sh) + average_grad[param_idx] + args.weight_decay*param.data + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]                
 
                     # EC_grad[param_idx] = sgd[param_idx] - decoding_grad.reshape(sh)
@@ -476,10 +473,7 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
 
                     new_encoding_grad = torch.mm((update_param_grad.reshape(sh) - average_grad[param_idx]), u)                        
                     new_decoding_grad = torch.mm(new_encoding_grad, u_t)
-                    buffer_svrg[param_idx] = new_decoding_grad + 
-                                             average_grad[param_idx] +
-                                             args.weight_decay * param.data +
-                                             args.momentum * buffer_svrg[param_idx]
+                    buffer_svrg[param_idx] = new_decoding_grad + average_grad[param_idx] + args.weight_decay*param.data + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]
 
                 else:
