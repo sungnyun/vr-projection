@@ -18,6 +18,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 import torchvision
 
+from models.vgg import *
 from models.resnet20 import *
 from models.resnet18 import *
 from cifar_wrapper import CIFAR_Wrapper
