@@ -68,6 +68,8 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
+parser.add_argument('--arch', default='resnet18', type=str,
+                    help='resnet18 | resnet20 | vgg16_bn')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -239,7 +241,14 @@ def main_worker(gpu, ngpus_per_node, args):
     
     
     # model = resnet20(num_classes=100)
-    model = resnet18(num_classes=100)
+    if args.arch == 'resnet18':
+        model = resnet18(num_classes=100)
+    elif args.arch == 'resnet20':
+        model = resnet20(num_classes=100)
+    elif args.arch == 'vgg16_bn':
+        model = vgg16_bn(num_classes=100)
+    else:
+        raise NotImplementedError
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda(args.gpu)
@@ -275,11 +284,11 @@ def main_worker(gpu, ngpus_per_node, args):
         model = model.cuda(args.gpu)
     else:
         # DataParallel will divide and allocate batch_size to all available GPUs
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
-        else:
-            model = torch.nn.DataParallel(model).cuda()
+        # if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
+        #     model.features = torch.nn.DataParallel(model.features)
+        #     model.cuda()
+        # else:
+        model = torch.nn.DataParallel(model).cuda()
     
             
      ###########################################################################################################################
