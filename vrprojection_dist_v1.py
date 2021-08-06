@@ -229,6 +229,7 @@ def main_worker(gpu, ngpus_per_node, args):
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed(args.seed)
         cudnn.deterministic = True
+        cudnn.benchmark = False
         #warnings.warn('You have chosen to seed training. '
         #              'This will turn on the CUDNN deterministic setting, '
         #              'which can slow down your training considerably! '
@@ -343,7 +344,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     ''' *지우지 말것*   train dataset 넘겨줄것. -> DistributedSampler(train_dataset) '''
     if args.distributed:#####      True      ################################
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, seed=args.seed)
     else:
         train_sampler = None
     '''----------------------------------------------------------------------------'''
