@@ -130,7 +130,7 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 """---------------------------------------- 파서 작성 ---------------------------------------- """
 parser.add_argument('--save_path',default='./res152_softmax1.0/', type=str, help='savepath')
 parser.add_argument('--gpu_count',default= 4, type=int, help='use gpu count')
-parser.add_argument('--clip_grad', default=False, action='store_true')
+parser.add_argument('--no_clip_grad', default=False, action='store_true')
 
 """---------------------------------------------코드 실행---------------------------------------------------- """
 ''' # --save_path './test/' --gpu_count 4 만 변경하고 돌릴 것 '''
@@ -140,6 +140,9 @@ parser.add_argument('--clip_grad', default=False, action='store_true')
 
 best_acc1 = 0
 args = parser.parse_args()
+args.lr *= args.trainbatch / 128
+for idx in range(len(args.schedule)):
+    args.schedule[idx] *= int(args.epochs / 200)
 state = {k: v for k, v in args._get_kwargs()}
 
 def ternarize_grad(grad):
@@ -451,7 +454,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, logger, time_l
         optimizer.zero_grad()
         grad = torch.autograd.grad(loss, model.parameters())
         
-        if args.clip_grad:
+        if not args.no_clip_grad:
             clipped_grad = []
             for grad_layer in grad:
                 grad_layer = clip(grad_layer)
