@@ -18,6 +18,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 import torchvision
 
+from models.vgg import *
 from models.resnet20 import *
 from models.resnet18 import *
 from cifar_wrapper import CIFAR_Wrapper
@@ -67,7 +68,9 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--epochs', default=200, type=int, metavar='N',
+parser.add_argument('--arch', default='resnet18', type=str,
+                    help='resnet18 | resnet20 | vgg16_bn')
+parser.add_argument('--epochs', default200, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -86,12 +89,12 @@ parser.add_argument('--schedule', type=int, nargs='+', default=[75, 130, 180],
 parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
 
 
-parser.add_argument('--lr', '--learning-rate', default=0.8, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.2, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)',
+parser.add_argument('--wd', '--weight-decay', default=1e-3, type=float,
+                    metavar='W', help='weight decay (default: 1e-3)',
                     dest='weight_decay')
 parser.add_argument('-p', '--print-freq', default=20, type=int,
                     metavar='N', help='print frequency (default: 10)')
@@ -132,18 +135,24 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 # Custom parser
 """---------------------------------------- 파서 작성 ---------------------------------------- """
 parser.add_argument('--save_path',default='./res152_softmax1.0/', type=str, help='savepath')
-parser.add_argument('--gpu_count',default= 4, type=int, help='use gpu count')
+parser.add_argument('--gpu_count',default= 8, type=int, help='use gpu count')
 parser.add_argument('--clip_grad', default=False, action='store_true')
 
 """---------------------------------------------코드 실행---------------------------------------------------- """
-# python terngrad_dist.py --dataset cifar100 --save_path ./terngrad_dist --multiprocessing-distributed --gpu_count 8
-# python terngrad_dist.py --dataset cifar100 --save_path ./terngrad_dist --lr 0.08 --gpu_count 8 --trainbatch 1024 --multiprocessing-distributed
+# python vrprojection_dist.py --dataset cifar100 --gpu_count 8 --trainbatch 1024 --save_path ./checkpoint/vrprojection_dist_resnet18_8workers --multiprocessing-distributed
 """--------------------------------------------------------------------------------------------------------- """
 
 best_acc1 = 0
 args = parser.parse_args()
+args.lr *= args.trainbatch / 128
+for idx in range(len(args.schedule)):
+    args.schedule[idx] *= int(args.epochs / 200)
 state = {k: v for k, v in args._get_kwargs()}
 
+MEAN = {'cifar10': (0.4914, 0.4822, 0.4465),
+        'cifar100': (0.5071, 0.4867, 0.4408)}
+STD = {'cifar10': (0.2470, 0.2435, 0.2616),
+       'cifar100': (0.2675, 0.2565, 0.2761)}
 
 def clip(tensor):
     shape = tensor.size()
@@ -153,12 +162,6 @@ def clip(tensor):
     c = 2.5 * std.item()
     clipped_tensor = (torch.clamp(tensor, -c, c)).reshape(shape)
     return clipped_tensor
-
-
-MEAN = {'cifar10': (0.4914, 0.4822, 0.4465),
-        'cifar100': (0.5071, 0.4867, 0.4408)}
-STD = {'cifar10': (0.2470, 0.2435, 0.2616),
-       'cifar100': (0.2675, 0.2565, 0.2761)}
 
 
 def main():
@@ -225,6 +228,7 @@ def main_worker(gpu, ngpus_per_node, args):
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed(args.seed)
         cudnn.deterministic = True
+        cudnn.benchmark = False
         #warnings.warn('You have chosen to seed training. '
         #              'This will turn on the CUDNN deterministic setting, '
         #              'which can slow down your training considerably! '
@@ -237,7 +241,14 @@ def main_worker(gpu, ngpus_per_node, args):
     
     
     # model = resnet20(num_classes=100)
-    model = resnet18(num_classes=100)
+    if args.arch == 'resnet18':
+        model = resnet18(num_classes=100)
+    elif args.arch == 'resnet20':
+        model = resnet20(num_classes=100)
+    elif args.arch == 'vgg16_bn':
+        model = vgg16_bn(num_classes=100)
+    else:
+        raise NotImplementedError
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda(args.gpu)
@@ -273,11 +284,11 @@ def main_worker(gpu, ngpus_per_node, args):
         model = model.cuda(args.gpu)
     else:
         # DataParallel will divide and allocate batch_size to all available GPUs
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
-        else:
-            model = torch.nn.DataParallel(model).cuda()
+        # if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
+        #     model.features = torch.nn.DataParallel(model.features)
+        #     model.cuda()
+        # else:
+        model = torch.nn.DataParallel(model).cuda()
     
             
      ###########################################################################################################################
@@ -332,7 +343,7 @@ def main_worker(gpu, ngpus_per_node, args):
     
     ''' *지우지 말것*   train dataset 넘겨줄것. -> DistributedSampler(train_dataset) '''
     if args.distributed:#####      True      ################################
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, seed=args.seed)
     else:
         train_sampler = None
     '''----------------------------------------------------------------------------'''
@@ -387,7 +398,7 @@ def main_worker(gpu, ngpus_per_node, args):
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed and args.rank % ngpus_per_node == 0):
             util.save_checkpoint({
                 'epoch': epoch + 1,
-                'arch': 'resnet20',
+                'arch': 'resnet18',
                 'state_dict': model.state_dict(),
                 'best_acc1': best_acc1,
                 'optimizer' : optimizer.state_dict(),
@@ -431,7 +442,7 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
         loss.backward()
         sgd_origin = []
         for param in model.parameters():
-            sgd_origin.append(param.grad.data + args.weight_decay*param.data)
+            sgd_origin.append(param.grad.data)
         sgd = copy.deepcopy(sgd_origin)
         
         with torch.no_grad():
@@ -439,10 +450,10 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
                 if len(param.shape) == 4:
                     sh = param.shape
                     compression_length = sh[1] * sh[2] * sh[3]
-                    update_param_grad = (sgd[param_idx] + (1/compression_length) * EC_grad[param_idx]).reshape([sh[0], compression_length])
-                    u = random_matrix_lst[param_idx]
-                    u = torch.from_numpy(u)# tensor로 바뀜
-                    u = u.type(torch.FloatTensor).cuda(args.gpu)
+                    update_param_grad = sgd[param_idx].reshape([sh[0], compression_length])
+                    update_param_grad = clip(update_param_grad)
+
+                    u = torch.from_numpy(random_matrix_lst[param_idx]).float().cuda(args.gpu)
                     u_t = u.transpose(0, 1)
                     
                     # Compression Gradient with Random Matrix
@@ -450,46 +461,34 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
                     decoding_grad = torch.mm(encoding_grad, u_t)
                     average_grad[param_idx] = (1/compression_length)*decoding_grad.reshape(sh) + args.momentum*average_grad[param_idx]
 
-                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]).reshape([sh[0], compression_length]), u)                        
+                    new_encoding_grad = torch.mm((update_param_grad.reshape(sh) - average_grad[param_idx]).reshape([sh[0], compression_length]), u)                        
                     new_decoding_grad = torch.mm(new_encoding_grad, u_t)
-                    buffer_svrg[param_idx] = clip(new_decoding_grad + average_grad[param_idx].reshape([sh[0], compression_length])).reshape(sh) + args.momentum*buffer_svrg[param_idx]
+                    buffer_svrg[param_idx] = new_decoding_grad.reshape(sh) + average_grad[param_idx] + args.weight_decay*param.data + args.momentum*buffer_svrg[param_idx]
                     param.grad.data = buffer_svrg[param_idx]                
 
-                    EC_grad[param_idx] = sgd[param_idx] - decoding_grad.reshape(sh)
+                    # EC_grad[param_idx] = sgd[param_idx] - decoding_grad.reshape(sh)
             
                 elif len(param.shape) == 2:
-#                    u = random_matrix_lst[param_idx]
-#                    u = torch.from_numpy(u)
-#                    u = u.type(torch.FloatTensor).cuda(args.gpu)
-#                    u_t = u.transpose(0, 1)
-#
-#                    # Compression Gradient with Random Matrix
-#                    encoding_grad = torch.mm(sgd[param_idx], u)
-#                    decoding_grad = torch.mm(encoding_grad, u_t)
-#                    average_grad[param_idx] = args.fc_cr*decoding_grad + args.momentum*average_grad[param_idx]
-#
-#                    new_encoding_grad = torch.mm((param.grad.data + args.weight_decay*param.data - average_grad[param_idx]), u)
-#                    new_decoding_grad = torch.mm(new_encoding_grad, u_t)
-#                    buffer_svrg[param_idx] = (new_decoding_grad + average_grad[param_idx]) + args.momentum*buffer_svrg[param_idx]
-                    buffer_svrg[param_idx] = sgd[param_idx] + args.momentum * buffer_svrg[param_idx]
-                    #TODO: clipping point check!
-                    param.grad.data = clip(buffer_svrg[param_idx])
-                else:
-                    buffer_svrg[param_idx] = sgd[param_idx] + args.momentum * buffer_svrg[param_idx]
-                    param.grad.data = clip(buffer_svrg[param_idx])
-        
-        # if args.clip_grad:
-        #     for grad_layer in grad:
-        #         grad_layer = clip(grad_layer)
+                    sh = param.shape
+                    update_param_grad = sgd[param_idx]
+                    update_param_grad = clip(update_param_grad)
 
-        # max_s_t, tern_grad_component = ternarize_grad(grad)
-        # buffer_svrg_sharing = []
-        # for idx in range(len(buffer_svrg)):
-        #     buffer_svrg_gather = [torch.ones_like(buffer_svrg[idx]) for _ in range(dist.get_world_size())]
-        #     dist.all_gather(buffer_svrg_gather, buffer_svrg[idx], async_op=False)
-        #     buffer_svrg_sharing.append(torch.stack(buffer_svrg_gather, dim=0).max())
-        # for model_param, grad_sharing in zip(model.parameters(), buffer_svrg_sharing):
-        #     model_param.grad.data = grad_sharing
+                    u = torch.from_numpy(random_matrix_lst[param_idx]).float().cuda(args.gpu)
+                    u_t = u.transpose(0, 1)
+
+                    # Compression Gradient with Random Matrix
+                    encoding_grad = torch.mm(update_param_grad, u)
+                    decoding_grad = torch.mm(encoding_grad, u_t)
+                    average_grad[param_idx] = (1/sh[1])*decoding_grad.reshape(sh) + args.momentum*average_grad[param_idx]
+
+                    new_encoding_grad = torch.mm((update_param_grad.reshape(sh) - average_grad[param_idx]), u)                        
+                    new_decoding_grad = torch.mm(new_encoding_grad, u_t)
+                    buffer_svrg[param_idx] = new_decoding_grad + average_grad[param_idx] + args.weight_decay*param.data + args.momentum*buffer_svrg[param_idx]
+                    param.grad.data = buffer_svrg[param_idx]
+
+                else:
+                    buffer_svrg[param_idx] = clip(sgd[param_idx]) + args.weight_decay * param.data + args.momentum * buffer_svrg[param_idx]
+                    param.grad.data = buffer_svrg[param_idx]
         
         # Gradient averaging
         average_gradients(model) 
@@ -511,14 +510,11 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
         batch_time.update(time.time() - end)
         end = time.time()
         
-        
         ################################# 이거 잘 이해 안됨  ######################################################    
         ''' ------------------------- gpu 하나로만 출력하기. (rank == 0 : 0번 gpu에서만 출력하도록.)-----------------------------'''
         if dist.get_rank() == 0:
             if i % args.print_freq == 0:
                 progress.display(i)
-         
-        
         
     ''' ------------------------- logger 에 업데이트-----------------------------'''
     if dist.get_rank() == 0:
@@ -588,12 +584,14 @@ def generate_random_matrixlist(model):
             row_d = sh[1] * sh[2] * sh[3]
             u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=1/row_d, s=1)
             random_matrix_lst.append(u)     
-        if len(param.shape) == 2:
-#            sh = param.shape
-#            row_d = max(sh[0], sh[1])
-#            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=args.fc_cr, s=1)
-            random_matrix_lst.append(None)
-        elif len(param.shape) == 1:
+
+        elif len(param.shape) == 2:
+            sh = param.shape
+            row_d = sh[1]
+            u = general_generate_random_ternary_matrix_with_seed(row_d, ratio=1/row_d, s=1)
+            random_matrix_lst.append(u)
+
+        else:
             random_matrix_lst.append(None)
 
     return random_matrix_lst
@@ -619,6 +617,23 @@ def adjust_learning_rate(optimizer, epoch):
         state['lr'] *= args.gamma
         for param_group in optimizer.param_groups:
             param_group['lr'] = state['lr']
+
+def get_top1(test_accuracy):
+    top1_acc_list = []
+    for acc in test_accuracy:
+        top1_acc_list.append(acc)
+    max_top1_acc= np.sort(top1_acc_list)[-1]
+    
+    return max_top1_acc
+
+def get_top5(test_accuracy):
+    top1_acc_list = []
+    for acc in test_accuracy:
+        top1_acc_list.append(acc[2])
+    max_top5_acc= np.sort(top1_acc_list)[-1]
+    
+    return max_top5_acc
+
 
 if __name__ == '__main__':
     main()
