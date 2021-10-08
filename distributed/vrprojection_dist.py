@@ -132,13 +132,14 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'fastest way to use PyTorch for either single node or '
                          'multi node data parallel training')
 ###################################################################################
+
 # Custom parser
-"""---------------------------------------- 파서 작성 ---------------------------------------- """
+"""---------------------------------------- parsers ---------------------------------------- """
 parser.add_argument('--save_path',default='./res152_softmax1.0/', type=str, help='savepath')
 parser.add_argument('--gpu_count',default= 8, type=int, help='use gpu count')
 parser.add_argument('--clip_grad', default=False, action='store_true')
 
-"""---------------------------------------------코드 실행---------------------------------------------------- """
+"""--------------------------------------------- run script example ---------------------------------------------------- """
 # python vrprojection_dist.py --dataset cifar100 --gpu_count 8 --trainbatch 1024 --save_path ./checkpoint/vrprojection_dist_resnet18_8workers --multiprocessing-distributed
 """--------------------------------------------------------------------------------------------------------- """
 
@@ -237,8 +238,7 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         raise Exception('Set seed or this method does not work!')
    
-    """---------------------------------------- 모델, opimizer,loss 선언 ---------------------------------------- """
-    
+    """---------------------------------------- define model, loss, optimizer ---------------------------------------- """
     
     # model = resnet20(num_classes=100)
     if args.arch == 'resnet18':
@@ -256,13 +256,13 @@ def main_worker(gpu, ngpus_per_node, args):
     
     """--------------------------------------------------------------------------------------------------------- """
     
-    if args.distributed:#분산에선 True
+    if args.distributed:
 
         # For multiprocessing distributed, DistributedDataParallel constructor
         # should always set the single device scope, otherwise,
         # DistributedDataParallel will use all available devices.
        
-        if args.gpu is not None:############################################## args.gpu=3,0,1,2로 not None!! spawn쓰면 None이었던게 배정되버림                       
+        if args.gpu is not None:                       
             torch.cuda.set_device(args.gpu)
             model.cuda(args.gpu)
             # When using a single GPU per process and per
@@ -272,7 +272,7 @@ def main_worker(gpu, ngpus_per_node, args):
             args.workers = int((args.workers + ngpus_per_node - 1) / ngpus_per_node)
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
             num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        else:###################분산에선 이걸로 돌아감!!!#########################################
+        else:
             model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
@@ -319,7 +319,7 @@ def main_worker(gpu, ngpus_per_node, args):
     #cudnn.benchmark = True
 
 
-    """---------------------------------------- 데이터 및 train 코드 작성. ----------------------------------------------- """
+    """---------------------------------------- training ----------------------------------------------- """
 
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -341,7 +341,6 @@ def main_worker(gpu, ngpus_per_node, args):
         test_dataset = datasets.CIFAR100(root='/home/osilab/dataset/cifar100', train=False, download=False, transform=transform_test)
 
     
-    ''' *지우지 말것*   train dataset 넘겨줄것. -> DistributedSampler(train_dataset) '''
     if args.distributed:#####      True      ################################
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, seed=args.seed)
     else:
@@ -353,16 +352,16 @@ def main_worker(gpu, ngpus_per_node, args):
 
     
     if args.evaluate:
-        validate(test_loader, model, criterion, args)###top1.avg를 리턴한다.
+        validate(test_loader, model, criterion, args)
         return
     ##################################################################################
-    ''' -------------------------저장 경로 설정-----------------------------'''
+    ''' ------------------------- set save direcotry -----------------------------'''
     save_path = args.save_path
     if dist.get_rank() == 0:
         if not os.path.exists(save_path):
             os.makedirs(save_path)
 
-    ''' -------------------------logger 선언----------------------------'''
+    ''' ------------------------- define logger ----------------------------'''
     train_logger = util.Logger(os.path.join(save_path, 'train.log'))
     valid_logger = util.Logger(os.path.join(save_path, 'valid.log'))
     train_time_logger = util.Logger(os.path.join(save_path, 'train_time.log'))
@@ -375,12 +374,12 @@ def main_worker(gpu, ngpus_per_node, args):
         buffer_svrg.append(torch.zeros(param.size()).cuda())
         EC_grad.append(torch.zeros(param.size()).cuda())
     
-    ''' -------------------------학습 시작-----------------------------'''
+    ''' -------------------------train start-----------------------------'''
     for epoch in range(args.start_epoch, args.epochs):
-        ''' -------------------------건들지 말기.-----------------------------'''
+        
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        ''' -----------------------------------------------------------------'''
+        
 
         ''' -------------------------learning_rate decay---------------------'''
         adjust_learning_rate(optimizer, epoch)
@@ -407,15 +406,14 @@ def main_worker(gpu, ngpus_per_node, args):
 
             
 def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, optimizer, epoch, args, logger, time_logger):
-    ''' -------------------------averageMeter 선언.-----------------------------'''
+    ''' -------------------------define AverageMeter-----------------------------'''
     batch_time = util.AverageMeter('Time', ':6.3f')
     data_time = util.AverageMeter('Data', ':6.3f')
     losses = util.AverageMeter('Loss', ':.4f')
     top1 = util.AverageMeter('Acc@1', ':6.2f')
     top5 = util.AverageMeter('Acc@5', ':6.2f')
     
-    ###########################없어도 될 것 같음##########################################
-    ''' -------------------------출력 progress 선언.-----------------------------'''
+    ''' -------------------------define ProgressMeter-----------------------------'''
     progress = util.ProgressMeter(
         len(train_loader),
         [batch_time, data_time, losses, top1, top5],
@@ -423,7 +421,7 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
     #######################################################################################
     
     
-    ''' -------------------------학습 시작.-----------------------------'''
+    ''' -------------------------train start-----------------------------'''
     model.train()
     end = time.time()
     for i, (images, target) in enumerate(train_loader):
@@ -494,15 +492,15 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
         average_gradients(model) 
         optimizer.step()
         
-        ''' -------------------------이미지넷 top1, top5 accuracy----------------------------'''
+        ''' -------------------------top1, top5 accuracy----------------------------'''
         acc1, acc5, correct = util.accuracy(output, target, topk=(1, 5))
 
-        ''' -------------------------각 GPU log 합쳐주기-----------------------------'''
+        ''' -------------------------aggreage each GPU log-----------------------------'''
         reduced_loss = reduce_tensor(loss.data)
         reduced_top1 = reduce_tensor(acc1.data)
         reduced_top5 = reduce_tensor(acc5.data)
 
-        ''' ------------------------- averageMeter에 업데이트 -----------------------------'''
+        ''' ------------------------- update on AverageMeter -----------------------------'''
         losses.update(reduced_loss.item(), images.size(0))
         top1.update(reduced_top1.item(), images.size(0))
         top5.update(reduced_top5.item(), images.size(0))
@@ -510,13 +508,12 @@ def train(average_grad, buffer_svrg, EC_grad, train_loader, model, criterion, op
         batch_time.update(time.time() - end)
         end = time.time()
         
-        ################################# 이거 잘 이해 안됨  ######################################################    
-        ''' ------------------------- gpu 하나로만 출력하기. (rank == 0 : 0번 gpu에서만 출력하도록.)-----------------------------'''
+        ''' ------------------------- print on 1 GPU (rank == 0 : print GPU 0)-----------------------------'''
         if dist.get_rank() == 0:
             if i % args.print_freq == 0:
                 progress.display(i)
         
-    ''' ------------------------- logger 에 업데이트-----------------------------'''
+    ''' -------------------------update on logger-----------------------------'''
     if dist.get_rank() == 0:
         logger.write([epoch, losses.avg, top1.avg, top5.avg])
         time_logger.write([epoch, batch_time.avg, data_time.avg])
@@ -541,7 +538,7 @@ def validate(test_loader, model, criterion, epoch, args, logger, time_logger):
         for i, (images, target) in enumerate(test_loader):
             data_time.update(time.time() - end)
 
-            if args.gpu is not None:#####None이다#############
+            if args.gpu is not None:
                 images = images.cuda(args.gpu, non_blocking=True)
             target = target.cuda(args.gpu, non_blocking=True)
 
@@ -550,9 +547,9 @@ def validate(test_loader, model, criterion, epoch, args, logger, time_logger):
 
             acc1, acc5, correct = util.accuracy(output, target, topk=(1, 5))
 
-            reduced_loss = reduce_tensor(loss.data)######각 worker에서의 loss를 average ####
-            reduced_top1 = reduce_tensor(acc1.data)######각 worker에서의 top1 accuracy를 average ####
-            reduced_top5 = reduce_tensor(acc5.data)######각 worker에서의 top5 accuracy를 average ####
+            reduced_loss = reduce_tensor(loss.data)
+            reduced_top1 = reduce_tensor(acc1.data)
+            reduced_top5 = reduce_tensor(acc5.data)
 
             losses.update(reduced_loss.item(), images.size(0))
             top1.update(reduced_top1.item(), images.size(0))
@@ -601,15 +598,15 @@ def average_gradients(model):
         dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
         param.grad.data /= args.gpu_count
 
-'''-----------------------------GPU에 있는 각 데이터 평균 취하기------------------------'''
+'''----------------------------average on every GPU------------------------'''
 def reduce_tensor(tensor):
     rt = tensor.clone()
     dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    # gpu 갯수로 나눠줌.
+    # divide by number of GPU
     rt /= args.gpu_count
     return rt
 
-'''----------------------------learning_rate deacy 설정 (ex)30 epcoh 마다 decay)-------------------------'''
+'''----------------------------set learning rate decay-------------------------'''
 def adjust_learning_rate(optimizer, epoch):
 
     global state
